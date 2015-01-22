@@ -1,0 +1,8 @@
+This is an arduino (based on Silicon Labs arduino) espresso machine controller. It controlled my Francis Francis X5 espresso machine with hardware modifications. The espresso was signficantly better. It uses PID to control the temperature.
+
+The code does not work currently, but it did at one point before I botched it accidently.
+
+The hardware modifications were such as using solid state realy to control the heating element. Hardware is not currently documented.
+
+Data/analysis is also included under data folder- it is loosley organized.
+

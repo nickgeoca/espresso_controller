@@ -1,0 +1,8 @@
+Espresso Notes:
+ * Insulating boiler increases heat capacity. But steaming becomes more difficult.
+   * May need second boiler, or bleed water through to lower the temp (use an LED to signal bleeding the water through).
+ * Combine two temp sensor inputs into a control system package. The outside temp sensor has a delay, so incorperate that into control system.
+ * Pressure gauge or sensor to help users.
+ * Saftey- limit how long heater is on at a time. Handling fault isrs, improve watchdog, etc.
+ * Internal temp sensor is off, so relook up specs on it.
+ 
