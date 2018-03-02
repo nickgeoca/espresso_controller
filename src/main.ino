@@ -3,6 +3,7 @@
 #include "globals.h"
 #include <SPI.h>
 #include <stdint.h>
+#include "parameters.h"
 
 // Shutoff time
 #define THIRTY_MINUTES (30 * 60 * 1000)
@@ -18,26 +19,25 @@ void loop(void) {
   resetCheck();
 }
 
-static volatile uint32_t g_LD_head = 0;
-static volatile uint32_t g_head_temp = 0;
-
 void setupPID(void) {
-    for (int i = 0; i < 3; i++) { 
-        initPID(sensorPIDData[i], (float)heaterInputRange / 120); 
-    }
-	
-    sensorPIDData[mode_pump_off].kp = 0.12;
-    sensorPIDData[mode_pump_off].ki = 0.000;
-    sensorPIDData[mode_pump_off].kd = 0.25004;
-
-    sensorPIDData[mode_pump_on].kp = .09;//bitt/lessflav-.07; //.09
-    sensorPIDData[mode_pump_on].ki = 0;
-    sensorPIDData[mode_pump_on].kd = .05;//see above-.03; //.05
+  sensorPIDData[mode_pump_off].dt = (float)heaterInputRange / 120; 
+  sensorPIDData[mode_pump_off].intgrl = 0;
+  sensorPIDData[mode_pump_off].prev_err = 0;
+  sensorPIDData[mode_pump_off].kp = pumpOffKp;
+  sensorPIDData[mode_pump_off].ki = pumpOffKi;
+  sensorPIDData[mode_pump_off].kd = pumpOffKd;
+  
+  sensorPIDData[mode_pump_on].dt = (float)heaterInputRange / 120; 
+  sensorPIDData[mode_pump_on].intgrl = 0;
+  sensorPIDData[mode_pump_on].prev_err = 0;
+  sensorPIDData[mode_pump_on].kp = pumpOnKp;
+  sensorPIDData[mode_pump_on].ki = pumpOnKi;
+  sensorPIDData[mode_pump_on].kd = pumpOnKd;
 }
 
 void setupHardware(void) {
     initIDAC();
-	
+
     // Set timer to fire at 120Hz
     initTimer(120);			
     Timer1.attachInterrupt(1, ctrlHeater);

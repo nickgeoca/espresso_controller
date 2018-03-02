@@ -1,109 +1,74 @@
 #include "globals.h"
+#include "parameters.h"
 
-// Parameters
-const uint32_t previous_temps_size = 1;
-const uint32_t heaterInputRange = 60;
-const uint32_t pumpInputRange = 7;
-const float g_LEDOnBand = 2;
-const float g_setTemperature = 200;
-
-volatile uint32_t g_heatSet = 0;
-pid_data_t sensorPIDData[3];
-volatile uint32_t g_LEDOn_True = 0;
+const uint32_t previous_temps_size = 3;
 volatile float previous_temperatures[previous_temps_size];
-thread_mail_t mail_heaterControl;
+
+pid_data_t sensorPIDData[3];
 
 void queue_temp(float val);
 float get_avg_temp(void);
-uint32_t scale_onoff(uint32_t scl, uint32_t val, uint32_t cnt);
 
 //**************************************************************************************************
 // Controller
 // Description:
 //         Controls espresso temperature.
 
-void ctrlHeater(void)
-{
-  static int32_t ctr = 0, state = 1, heat_cntr, pump_state;
-  static bool pumpChangedState = false;
+void ctrlHeater(void) {
+  static int32_t heaterCntr = 0, heaterThreshold = 0, pump_state = mode_pump_off, pumpCntr = 0;
 
-  ctr += 1;
-  
-  // Run PID function before the start of the new step
-  if (ctr > heaterInputRange) {
-    ctr = 0;
-    queue_temp(getTemp1());
-    digitalWrite(heaterPin, HEATER_OFF);
+  heaterCntr = (heaterCntr + 1) % heaterInputRange;
+  pumpCntr = (pumpCntr + 1) % pumpInputRange;
 
-    float temperature = get_avg_temp();
-
-    // Calculate pid and scale based on pump speed
-    float pid_rslt = pidCalc( g_setTemperature
-                            , temperature
-                            , sensorPIDData[mail_heaterControl.data.state]);
-    if (pump_state == mode_pump_on) pid_rslt = pid_rslt * pump_cntr / pumpInputRange;
-    
-    heat_cntr = (uint32_t)(pid_rslt * (float)heaterInputRange);
-  }
-  
-  // ---- Heater
-  if (ctr == heat_cntr)
-    togglePin(heaterPin);
-  
   // ---- Pump
+  bool pumpChangedState = false;
   if (digitalRead(pumpPinIn)) {
     pumpChangedState = pump_state != mode_pump_on;
     pump_state = mode_pump_on;
+
+    uint32_t powerPump = (pumpCntr > 3)?1:0; 
+    digitalWrite(pumpPinOut, powerPump);
   }
   else {
     pumpChangedState = pump_state != mode_pump_off;
     pump_state = mode_pump_off;
   }
-  
-  // Clear PID if pump changed state
-  if (pumpChangedState) {
-    sensorPIDData[pump_state].intgrl = 0;
-    sensorPIDData[pump_state].prev_err = 0;
+
+  // ---- Queue temperatures to average
+  if (heaterCntr >= (heaterInputRange - previous_temps_size))
+    queue_temp(getTemp1());
+
+  // ---- Update PID
+  if (heaterCntr == 0) {
+    digitalWrite(heaterPin, HEATER_OFF);
+
+    // If changed state, clear pid vals
+    if (pumpChangedState) {
+      sensorPIDData[pump_state].intgrl = 0;
+      sensorPIDData[pump_state].prev_err = 0;
+    }
+    float temperature = get_avg_temp();
+
+    float pid_rslt = pidCalc( SET_TEMP
+                            , temperature
+                            , sensorPIDData[pump_state]);
+    
+    heaterThreshold = (uint32_t)(pid_rslt * (float)heaterInputRange);
+
+    // Set leds
+    if (abs(temperature - SET_TEMP) < g_LEDOnBand)
+      digitalWrite(notifyPin2, 1);
+    else 
+      digitalWrite(notifyPin2, 0);
   }
-
-
-  static uint32_t pumpCntr = 0;
-
-  uint32_t pumpOn = scale_onoff(pumpInputRange, pump_cntr, pumpCntr);
-  pumpCntr = (pumpCntr + 1) % pumpInputRange;
-  digitalWrite(pumpPinOut, pumpOn);
+  
+  // ---- Heater
+  if (heaterCntr == heaterThreshold)
+    togglePin(heaterPin);
 }
 
 //**************************************************************************************************
 // Miscallaneous
-
-// (cnt + 1) % (scl / (val + 1))
-uint32_t scale_onoff(uint32_t scl, uint32_t val, uint32_t cnt) {
-  uint32_t xr = 0;
-  if (val == 0) return 0;
-  if (val == scl) return 1;
-  if ((scl / val) == 1) xr = 1;
-  if (xr) val = scl - val;
-  if (cnt % (scl / val) != 0) return 0 ^ xr;
-  return 1 ^ xr;
-}
-
-
-void ctrlLED(void) {
-  static uint32_t ctr = 0;
-
-  bool ledon = abs(mail_heaterControl.data.set_temp - mail_heaterControl.data.actl_temp) < g_LEDOnBand);
-
-  if (ledon) {
-    if (ctr == 30) togglePin(notifyPin2);
-    else ctr += 1;
-  }
-  else {
-    digitalWrite(notifyPin2, 0);
-    ctr = 0;
-  }
-}
-
 
 void queue_temp(float val) {
   static uint32_t head = 0;

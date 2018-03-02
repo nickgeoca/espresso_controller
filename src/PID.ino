@@ -11,18 +11,6 @@ float max(float x, float y) {
 }
 
 
-void initPID(pid_data_t &data, float step_time) {
-  Serial.println("Setup PID");
-  
-  // Load temp sensor 1 PID data
-  //memcpy(&temp1, USER_FLASH_LOC, sizeof(pid_data_t));
-  
-  // Init PID settings
-  data.dt = step_time;
-  data.intgrl = 0;
-  data.prev_err = 0;
-}
-
 // returns 0 to 1
 float pidCalc(float set, float actl, pid_data_t &data) {
   float err, deriv, output;

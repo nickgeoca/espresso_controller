@@ -1,17 +1,7 @@
 #if !defined(globals_h_)
 #define globals_h_
 
-// Control system data
-extern const uint32_t heaterInputRange;
-extern const uint32_t pumpInputRange;
-extern const float g_LEDOnBand;
-extern const float g_setTemperature;
-
-extern volatile uint32_t g_heatSet;
 extern pid_data_t sensorPIDData[3];
-extern volatile uint32_t g_LEDOn_True;
-extern volatile float moving_average[1];
-extern thread_mail_t mail_heaterControl;
 
 // Pins
 extern const uint32_t notifyPin1;
