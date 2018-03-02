@@ -1,151 +1,123 @@
 #include "globals.h"
 
-// Control system data
+// Parameters
+const uint32_t previous_temps_size = 1;
 const uint32_t heaterInputRange = 60;
 const uint32_t pumpInputRange = 7;
 const float g_LEDOnBand = 2;
-const float g_setTemperature = 204;
+const float g_setTemperature = 200;
 
 volatile uint32_t g_heatSet = 0;
-volatile uint32_t g_pumpSet = 0;
 pid_data_t sensorPIDData[3];
 volatile uint32_t g_LEDOn_True = 0;
-volatile float moving_average[1];
+volatile float previous_temperatures[previous_temps_size];
 thread_mail_t mail_heaterControl;
 
-void queue_avg(float val) {
-  static uint32_t head = 0;
-  moving_average[head] = val;
-  head += 1;
-  head %= 1;
-}
-float get_avg(void) {
-  float sum = 0;
-  for (uint32_t i = 0; i < 1; i++) {
-    sum += moving_average[i];
-  }
-  return sum / 1;
-}
+void queue_temp(float val);
+float get_avg_temp(void);
+uint32_t scale_onoff(uint32_t scl, uint32_t val, uint32_t cnt);
 
 //**************************************************************************************************
-//                                                ctrlHeater
+// Controller
 // Description:
 //         Controls espresso temperature.
 
 void ctrlHeater(void)
 {
-    static int32_t ctr = 0, state = 1;
-    ctr -= 1;
+  static int32_t ctr = 0, state = 1, heat_cntr, pump_state;
+  static bool pumpChangedState = false;
+
+  ctr += 1;
+  
+  // Run PID function before the start of the new step
+  if (ctr > heaterInputRange) {
+    ctr = 0;
+    queue_temp(getTemp1());
+    digitalWrite(heaterPin, HEATER_OFF);
+
+    float temperature = get_avg_temp();
+
+    // Calculate pid and scale based on pump speed
+    float pid_rslt = pidCalc( g_setTemperature
+                            , temperature
+                            , sensorPIDData[mail_heaterControl.data.state]);
+    if (pump_state == mode_pump_on) pid_rslt = pid_rslt * pump_cntr / pumpInputRange;
     
-      printTerm();  
-    // Run PID function before the start of the new step
-    if (ctr <= 0) {
-        digitalWrite(heaterPin, HEATER_OFF);
-        ctr = heaterInputRange;
+    heat_cntr = (uint32_t)(pid_rslt * (float)heaterInputRange);
+  }
+  
+  // ---- Heater
+  if (ctr == heat_cntr)
+    togglePin(heaterPin);
+  
+  // ---- Pump
+  if (digitalRead(pumpPinIn)) {
+    pumpChangedState = pump_state != mode_pump_on;
+    pump_state = mode_pump_on;
+  }
+  else {
+    pumpChangedState = pump_state != mode_pump_off;
+    pump_state = mode_pump_off;
+  }
+  
+  // Clear PID if pump changed state
+  if (pumpChangedState) {
+    sensorPIDData[pump_state].intgrl = 0;
+    sensorPIDData[pump_state].prev_err = 0;
+  }
 
-        // Calculate new output value
-        queue_avg(getTemp1());
-        mail_heaterControl.data.actl_temp = get_avg();
-        
-        mail_heaterControl.pending = 1;
-        float pid_rslt = pidCalc(mail_heaterControl.data.set_temp, mail_heaterControl.data.actl_temp, sensorPIDData[mail_heaterControl.data.state]) * (mail_heaterControl.data.state == mode_pump_on ? g_pumpSet / pumpInputRange:1);
-        mail_heaterControl.data.heat_set = (uint32_t)(pid_rslt * (float)heaterInputRange);
-        float tmp = (mail_heaterControl.data.actl_temp - mail_heaterControl.data.set_temp) / mail_heaterControl.data.set_temp;
-        tmp = (1 - tmp) * (1 - tmp);
-        Timer1.setCompare(5, Timer1.getOverflow() - (uint32_t)((float)Timer1.getOverflow() * tmp * 3));
-        //analogWrite(notifyPin2, 8);//abs((int32_t)((float)256 * ((float)mail_heaterControl.data.actl_temp - (float)mail_heaterControl.data.set_temp) / (float)mail_heaterControl.data.set_temp)));
-        //Timer1.setCompare(5, (uint16_t)(Timer1.getOverflow()/ 2));
-    }
 
-    // Start of PID step
-    if (ctr == mail_heaterControl.data.heat_set)
-      togglePin(heaterPin);
+  static uint32_t pumpCntr = 0;
 
-    if (digitalRead(pumpPinIn)) 
-      g_pumpSet = pumpInputRange;
-    else
-      g_pumpSet = 0;
-    
-    if (g_pumpSet > 0) {
-        if (state == 1) {
-            sensorPIDData[mode_pump_on].intgrl = 0;
-            sensorPIDData[mode_pump_on].prev_err = 0;
-            mail_heaterControl.data.state = mode_pump_on;
-            state = 0;
-        }
-
-    }
-    else {
-        if (state == 0) {
-            sensorPIDData[mode_pump_off].intgrl = 0;
-            sensorPIDData[mode_pump_off].prev_err = 0;
-            mail_heaterControl.data.state = mode_pump_off;
-            state = 1;
-        }
-    }
-    static uint32_t pumpCntr = 0;
-    static uint32_t abc123 = 0;
-    abc123 += 1;
-    abc123 = abc123 % 2;
-    if (abc123) return;
-    uint32_t pumpOn = scale_onoff(pumpInputRange, g_pumpSet, pumpCntr);
-    pumpCntr = (pumpCntr + 1) % pumpInputRange;
-    digitalWrite(pumpPinOut, pumpOn);
-   // Serial.print(pumpOn);
-//uif (pumpCntr == 0)    Serial.println();
+  uint32_t pumpOn = scale_onoff(pumpInputRange, pump_cntr, pumpCntr);
+  pumpCntr = (pumpCntr + 1) % pumpInputRange;
+  digitalWrite(pumpPinOut, pumpOn);
 }
+
+//**************************************************************************************************
+// Miscallaneous
 
 // (cnt + 1) % (scl / (val + 1))
 uint32_t scale_onoff(uint32_t scl, uint32_t val, uint32_t cnt) {
-    uint32_t xr = 0;
-    if (val == 0) return 0;
-    if (val == scl) return 1;
-    if ((scl / val) == 1) xr = 1;
-    if (xr) val = scl - val;
-    if (cnt % (scl / val) != 0) return 0 ^ xr;
-    return 1 ^ xr;
+  uint32_t xr = 0;
+  if (val == 0) return 0;
+  if (val == scl) return 1;
+  if ((scl / val) == 1) xr = 1;
+  if (xr) val = scl - val;
+  if (cnt % (scl / val) != 0) return 0 ^ xr;
+  return 1 ^ xr;
 }
 
-void ctrlTask1(void) {
-    if (abs(mail_heaterControl.data.set_temp - mail_heaterControl.data.actl_temp) < g_LEDOnBand) {
-        g_LEDOn_True = 1;
-    }  
-    else {
-        g_LEDOn_True = 0;
-    }
-    // Output data from last step
-    mail_heaterControl.pending = 0;
-}
 
 void ctrlLED(void) {
-    static uint32_t ctr = 0;
-      printTerm();  
-    if (g_LEDOn_True) {
-      if (ctr == 30) togglePin(notifyPin2);
-      else ctr += 1;
-    }
-    else {
-      digitalWrite(notifyPin2, 0);
-      ctr = 0;
-    }
+  static uint32_t ctr = 0;
+
+  bool ledon = abs(mail_heaterControl.data.set_temp - mail_heaterControl.data.actl_temp) < g_LEDOnBand);
+
+  if (ledon) {
+    if (ctr == 30) togglePin(notifyPin2);
+    else ctr += 1;
+  }
+  else {
+    digitalWrite(notifyPin2, 0);
+    ctr = 0;
+  }
 }
 
-void threadStart(void) {
-        Serial.println("Thread start");
-        
-	// Begin control thread
-	mail_heaterControl.pending = 0;
+
+void queue_temp(float val) {
+  static uint32_t head = 0;
+
+  previous_temperatures[head] = val;
+  head = (head + 1) % previous_temps_size;
 }
 
-void threadBlock(void) {
-    while (mail_heaterControl.pending == 0);
-}
+float get_avg_temp(void) {
+  float sum = 0;
 
-uint32_t threadReady(void) {
-    return (uint32_t)mail_heaterControl.pending;
-}
+  for (uint32_t i = 0; i < previous_temps_size; i++) {
+    sum += previous_temperatures[i];
+  }
 
-void initControl(void) {
-    mail_heaterControl.data.set_temp = g_setTemperature;
-    mail_heaterControl.data.state = mode_pump_off;
+  return sum / (float)previous_temps_size;
 }

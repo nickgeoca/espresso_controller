@@ -8,7 +8,6 @@ extern const float g_LEDOnBand;
 extern const float g_setTemperature;
 
 extern volatile uint32_t g_heatSet;
-extern volatile uint32_t g_pumpSet;
 extern pid_data_t sensorPIDData[3];
 extern volatile uint32_t g_LEDOn_True;
 extern volatile float moving_average[1];
